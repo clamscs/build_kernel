@@ -44,7 +44,6 @@ jobs:
           cp susfs/kernel_patches/fs/* fs/
           cp susfs/kernel_patches/include/linux/* include/linux/
           patch -p1 < susfs/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch || true
-          patch -p1 -d KernelSU < susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || patch -p1 -d drivers/kernelsu < susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
           rm -rf susfs
 
           cat << 'EOF' >> arch/arm64/configs/gki_defconfig
