@@ -1,0 +1,86 @@
+name: Build GKI Android 12 5.10
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Kernel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Swap Space
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 20
+
+      - name: Install Dependencies & Latest Repo
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git ccache automake flex lzop bison \
+            bc build-essential zip curl libssl-dev libncurses5-dev \
+            libxml2-utils xsltproc rsync python3 python-is-python3
+
+          mkdir -p ~/.bin
+          curl -s https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
+          chmod a+rx ~/.bin/repo
+          echo "$HOME/.bin" >> $GITHUB_PATH
+
+      - name: Sync Kernel Source
+        run: |
+          mkdir -p workspace && cd workspace
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android12-5.10-lts --depth=1
+          repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle
+
+      - name: Patch & Configure Kernel
+        run: |
+          cd workspace/common
+
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
+          curl -LSs "https://raw.githubusercontent.com/xxblebleblexx/nomount-installer/refs/heads/installer/nomount.sh" | bash -s 5.10
+
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs
+          cp susfs/kernel_patches/fs/* fs/
+          cp susfs/kernel_patches/include/linux/* include/linux/
+          patch -p1 < susfs/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch || true
+          patch -p1 -d KernelSU < susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || patch -p1 -d drivers/kernelsu < susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+          rm -rf susfs
+
+          cat << 'EOF' >> arch/arm64/configs/gki_defconfig
+          CONFIG_NOMOUNT=y
+          CONFIG_KSU=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=n
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          CONFIG_KSU_SUSFS_SUS_SU=n
+          EOF
+
+          sed -i 's/check_defconfig//g' build.config.gki*
+
+          git add -A
+          git commit --allow-empty-message -m ""
+
+      - name: Compile Kernel
+        run: |
+          cd workspace
+          BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: GKI-android12-5.10-Image
+          path: |
+            workspace/out/android12-5.10/dist/Image*
+            workspace/out/android12-5.10/dist/*.ko
+            
