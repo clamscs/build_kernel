@@ -1,0 +1,75 @@
+name: Build OnePlus MT6765 Kernel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Set Swap Space
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 10
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf libelf-dev libncurses5-dev libssl-dev libxml2 libxml2-utils lz4 lzop make ninja-build patch pkg-config python3 rsync tar unzip zip zlib1g-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+
+      - name: Download Google Clang 11
+        run: |
+          mkdir -p clang
+          curl -LSs "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r383902b.tar.gz" | tar -xz -C clang
+
+      - name: Clone Kernel Source
+        run: |
+          git clone --depth=1 https://github.com/OnePlusOSS/android_kernel_4.19_oneplus_mt6765 -b oneplus/mt6765_s_12.1_oneplus_nord_n20_se android_kernel_4.19_oneplus_mt6765
+
+      - name: Clone Vendor Modules
+        run: |
+          git clone --depth=1 https://github.com/OnePlusOSS/android_vendor_mediatek_kernel_modules_mt6765 -b oneplus/mt6765_s_12.1_oneplus_nord_n20_se android_vendor_mediatek_kernel_modules_mt6765
+
+      - name: Fix Broken Symlinks
+        run: |
+          cd android_kernel_4.19_oneplus_mt6765
+          VENDOR_DIR="../android_vendor_mediatek_kernel_modules_mt6765"
+          find . -type l | while IFS= read -r link; do
+              if [ ! -e "$link" ]; then
+                  target=$(readlink "$link")
+                  rel_path="vendor/${target#*vendor/}"
+                  rel_path="${rel_path%/}"
+                  src_path="$VENDOR_DIR/$rel_path"
+                  if [ -e "$src_path" ]; then
+                      rm -rf "$link"
+                      mkdir -p "$(dirname "$link")"
+                      cp -r "$src_path" "$link"
+                  fi
+              fi
+          done
+          ln -sf ../android_vendor_mediatek_kernel_modules_mt6765/vendor ../vendor
+
+      - name: Build Kernel
+        run: |
+          cd android_kernel_4.19_oneplus_mt6765
+          export PATH="${GITHUB_WORKSPACE}/clang/bin:$PATH"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          export CC=clang
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+
+          make O=out ARCH=arm64 k65v1_64_bsp_defconfig
+          make -j$(nproc --all) O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+
+      - name: Upload Kernel Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MT6765-Kernel
+          path: |
+            android_kernel_4.19_oneplus_mt6765/out/arch/arm64/boot/Image*
+            android_kernel_4.19_oneplus_mt6765/out/arch/arm64/boot/dtb*
+            android_kernel_4.19_oneplus_mt6765/out/arch/arm64/boot/dtbo.img
+            
