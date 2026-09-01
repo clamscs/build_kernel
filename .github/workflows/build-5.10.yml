@@ -67,8 +67,8 @@ jobs:
 
           sed -i 's/check_defconfig//g' build.config.gki*
 
-          git add -A
-          git commit --allow-empty-message -m ""
+          git add .
+          git commit -m "feat: add KernelSU & NoMount"
 
       - name: Compile Kernel
         run: |
